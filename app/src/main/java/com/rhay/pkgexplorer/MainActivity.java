@@ -91,7 +91,8 @@ public class MainActivity extends Activity {
      csvData.append(i).append(",").append(hex(id)).append(",").append(hex(nameOff)).append(",").append(hex(flags)).append(",").append(hex(unk)).append(",").append(off).append(",").append(size).append(",").append(valid).append("\\n");
      s.append(String.format(Locale.US,"#%04d ID=%s nomeRef=%s flags=%s extra=%s offset=%s tamanho=%s\n",i,hex(id),hex(nameOff),hex(flags),hex(unk),hex(off),hex(size)));
     }
-    s.append("Entradas com limites suspeitos: ").append(suspicious).append("\n");\n    s.append("Nota: offset e tamanho de cada registro são campos de 32 bits; os 8 bytes finais não são tamanho.\\n");
+    s.append("Entradas com limites suspeitos: ").append(suspicious).append("\n");
+    s.append("Nota: offset e tamanho de cada registro são campos de 32 bits; os 8 bytes finais não são tamanho.\n");
    }
   }
   if(scan){
