@@ -25,7 +25,7 @@ public class MainActivity extends Activity {
   root=new LinearLayout(this);root.setOrientation(1);root.setPadding(28,30,28,36);root.setBackgroundColor(bg);
   scroll.addView(root);setContentView(scroll);
   TextView title=text("RHAY  /  PKG EXPLORER",25,cyan);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-  root.addView(text("PRO ANALYZER 2.1  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
+  root.addView(text("PRO ANALYZER 2.2  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
   section("ARQUIVO");
   button("01   SELECIONAR PKG",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK);});
   status=text("Nenhum pacote selecionado",13,Color.LTGRAY);root.addView(status);
@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
  private static String bytes(long x){return x+" bytes ("+String.format(Locale.US,"%.2f",x/1048576.0)+" MiB)";}
  private String read(boolean scan)throws IOException{
   StringBuilder csvData=new StringBuilder("indice,id,nome_ref,flags,extra,offset,tamanho,limites_validos\\n");
-  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.1\n==============================\n");
+  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.2\n==============================\n");
   s.append("URI: ").append(file).append("\n");
   long fileSize=-1;
   try(android.database.Cursor c=getContentResolver().query(file,new String[]{android.provider.OpenableColumns.SIZE},null,null,null)){if(c!=null&&c.moveToFirst()&&!c.isNull(0))fileSize=c.getLong(0);}catch(Exception ignored){}
@@ -86,12 +86,12 @@ public class MainActivity extends Activity {
     s.append("Campos numéricos apresentados em hexadecimal. IDs são metadados, não nomes de arquivos.\n");
     int suspicious=0;
     for(int i=0;i<entryCount;i++){
-     int p=i*32;long id=u32(entries,p),nameOff=u32(entries,p+4),flags=u32(entries,p+8),unk=u32(entries,p+12),off=u64(entries,p+16),size=u64(entries,p+24);
+     int p=i*32;long id=u32(entries,p),nameOff=u32(entries,p+4),flags=u32(entries,p+8),unk=u32(entries,p+12),off=u32(entries,p+16),size=u32(entries,p+20);
      boolean valid=!(off<0||size<0||(fileSize>=0&&(off>fileSize||size>fileSize-off)));if(!valid)suspicious++;
      csvData.append(i).append(",").append(hex(id)).append(",").append(hex(nameOff)).append(",").append(hex(flags)).append(",").append(hex(unk)).append(",").append(off).append(",").append(size).append(",").append(valid).append("\\n");
      s.append(String.format(Locale.US,"#%04d ID=%s nomeRef=%s flags=%s extra=%s offset=%s tamanho=%s\n",i,hex(id),hex(nameOff),hex(flags),hex(unk),hex(off),hex(size)));
     }
-    s.append("Entradas com limites suspeitos: ").append(suspicious).append("\n");
+    s.append("Entradas com limites suspeitos: ").append(suspicious).append("\n");\n    s.append("Nota: offset e tamanho de cada registro são campos de 32 bits; os 8 bytes finais não são tamanho.\\n");
    }
   }
   if(scan){
