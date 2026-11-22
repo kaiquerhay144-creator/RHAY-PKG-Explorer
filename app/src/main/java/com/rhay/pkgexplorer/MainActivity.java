@@ -13,10 +13,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class MainActivity extends Activity {
- private static final int PICK=1,SAVE=2,SAVE_CSV=3;
+ private static final int PICK=1,SAVE=2,SAVE_CSV=3,EXPORT_ENTRY=4;
  private Uri file;
  private TextView output,status;
  private String report="",csv="";
+ private int selectedEntry=-1; private long selectedOffset=0,selectedSize=0;
  private LinearLayout root;
  private int cyan=Color.rgb(42,225,232), bg=Color.rgb(9,14,27), panel=Color.rgb(22,33,53);
  @Override public void onCreate(Bundle b){
@@ -25,7 +26,7 @@ public class MainActivity extends Activity {
   root=new LinearLayout(this);root.setOrientation(1);root.setPadding(28,30,28,36);root.setBackgroundColor(bg);
   scroll.addView(root);setContentView(scroll);
   TextView title=text("RHAY  /  PKG EXPLORER",25,cyan);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-  root.addView(text("PRO ANALYZER 2.2  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
+  root.addView(text("PRO ANALYZER 2.3  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
   section("ARQUIVO");
   button("01   SELECIONAR PKG",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK);});
   status=text("Nenhum pacote selecionado",13,Color.LTGRAY);root.addView(status);
@@ -34,6 +35,7 @@ public class MainActivity extends Activity {
   button("03   ANALISAR + BUSCAR ASSINATURAS (32 MB)",()->analyze(true));
   button("04   EXPORTAR RELATÓRIO TXT",()->{if(report.isEmpty()){toast("Faça uma análise primeiro");return;}Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("text/plain");i.putExtra(Intent.EXTRA_TITLE,"RHAY_PKG_Explorer_2_relatorio.txt");startActivityForResult(i,SAVE);});
   button("05   EXPORTAR TABELA CSV",()->{if(csv.isEmpty()){toast("Analise o PKG primeiro");return;}Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("text/csv");i.putExtra(Intent.EXTRA_TITLE,"RHAY_PKG_entradas.csv");startActivityForResult(i,SAVE_CSV);});
+  button("06   EXTRAIR ENTRADA INDIVIDUAL (RAW)",()->chooseEntry());
   section("RESULTADO");
   output=text("Selecione seu PKG e execute a análise. O original nunca será modificado.",13,Color.rgb(217,232,246));output.setTextIsSelectable(true);output.setPadding(18,20,18,20);output.setBackgroundColor(panel);root.addView(output);
   root.addView(text("Modo somente leitura • Não descriptografa dados protegidos • A listagem de entradas não equivale à extração dos arquivos do jogo.",11,Color.rgb(151,170,191)));
@@ -42,7 +44,42 @@ public class MainActivity extends Activity {
  private void section(String s){TextView t=text(s,12,cyan);t.setTypeface(null,Typeface.BOLD);root.addView(t);}
  private void button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextColor(Color.WHITE);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(26,74,104)));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=10;root.addView(b,p);b.setOnClickListener(v->r.run());}
  private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
- @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;if(req==PICK){file=data.getData();status.setText("Selecionado: "+file.getLastPathSegment());try{getContentResolver().takePersistableUriPermission(file,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}}else if(req==SAVE||req==SAVE_CSV){try(OutputStream o=getContentResolver().openOutputStream(data.getData())){if(o==null)throw new IOException("Não foi possível abrir destino");o.write((req==SAVE?report:csv).getBytes(StandardCharsets.UTF_8));toast("Arquivo salvo");}catch(Exception e){toast(e.toString());}}}
+ @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;if(req==PICK){file=data.getData();status.setText("Selecionado: "+file.getLastPathSegment());try{getContentResolver().takePersistableUriPermission(file,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}}else if(req==EXPORT_ENTRY){exportEntry(data.getData());}else if(req==SAVE||req==SAVE_CSV){try(OutputStream o=getContentResolver().openOutputStream(data.getData())){if(o==null)throw new IOException("Não foi possível abrir destino");o.write((req==SAVE?report:csv).getBytes(StandardCharsets.UTF_8));toast("Arquivo salvo");}catch(Exception e){toast(e.toString());}}}
+ private void chooseEntry(){
+  if(file==null){toast("Selecione o PKG");return;}
+  EditText field=new EditText(this);field.setInputType(2);field.setHint("Exemplo: 5 para a entrada ID 0x200");
+  new AlertDialog.Builder(this).setTitle("Extrair entrada RAW").setMessage("Informe o índice da entrada (0 a 24 neste PKG). Somente dados brutos, sem descriptografia. Limite: 64 MiB por entrada.").setView(field).setNegativeButton("Cancelar",null).setPositiveButton("Continuar",(d,w)->{
+   int index;try{index=Integer.parseInt(field.getText().toString().trim());}catch(Exception e){toast("Índice inválido");return;}
+   new Thread(()->{try{
+    byte[] h=new byte[32];byte[] header=new byte[32];
+    try(InputStream in=getContentResolver().openInputStream(file)){if(in==null)throw new IOException("Arquivo inacessível");readFully(in,header);}
+    long count=u32(header,0x10),offset=u32(header,0x18);
+    if(index<0||index>=count||count>200000)throw new IOException("Índice fora da tabela");
+    try(InputStream in=getContentResolver().openInputStream(file)){if(in==null)throw new IOException("Arquivo inacessível");skipFully(in,offset+index*32L);readFully(in,h);}
+    long entryOffset=u32(h,16),entrySize=u32(h,20);
+    if(entrySize<=0||entrySize>67108864L)throw new IOException("Tamanho não permitido: "+entrySize+" bytes (máximo 64 MiB)");
+    long actualSize=-1;try(android.database.Cursor cur=getContentResolver().query(file,new String[]{android.provider.OpenableColumns.SIZE},null,null,null)){if(cur!=null&&cur.moveToFirst()&&!cur.isNull(0))actualSize=cur.getLong(0);}catch(Exception ignored){}
+    if(actualSize>=0&&(entryOffset>actualSize||entrySize>actualSize-entryOffset))throw new IOException("Entrada ultrapassa tamanho do PKG");
+    selectedEntry=index;selectedOffset=entryOffset;selectedSize=entrySize;
+    runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/octet-stream");i.putExtra(Intent.EXTRA_TITLE,String.format(Locale.US,"rhay_entry_%04d_id_%X.bin",index,u32(h,0)));startActivityForResult(i,EXPORT_ENTRY);});
+   }catch(Exception e){runOnUiThread(()->toast("Não foi possível selecionar entrada: "+e.getMessage()));}}).start();
+  }).show();
+ }
+ private void exportEntry(Uri destination){
+  final long offset=selectedOffset,size=selectedSize;final int index=selectedEntry;
+  if(destination==null||file==null||index<0){toast("Extração cancelada");return;}
+  status.setText("Exportando entrada #"+index+"...");
+  new Thread(()->{
+   String message;
+   try(InputStream in=getContentResolver().openInputStream(file);OutputStream out=getContentResolver().openOutputStream(destination)){
+    if(in==null||out==null)throw new IOException("Não foi possível abrir arquivo");
+    skipFully(in,offset);byte[] buffer=new byte[65536];long remaining=size;
+    while(remaining>0){int n=in.read(buffer,0,(int)Math.min(buffer.length,remaining));if(n<0)throw new EOFException("Entrada incompleta");if(n>0){out.write(buffer,0,n);remaining-=n;}}
+    message="Entrada #"+index+" exportada: "+size+" bytes (RAW)";
+   }catch(Exception e){message="Erro na exportação: "+e.getMessage();}
+   final String m=message;runOnUiThread(()->{status.setText(m);toast(m);});
+  }).start();
+ }
  private void analyze(boolean scan){if(file==null){toast("Selecione um PKG");return;}status.setText("Analisando...");new Thread(()->{String r;try{r=read(scan);}catch(Exception e){r="Erro na leitura: "+e;}final String done=r;runOnUiThread(()->{report=done;output.setText(done);status.setText("Análise concluída");});}).start();}
  private static long u32(byte[] b,int p){return ((long)(b[p]&255)<<24)|((long)(b[p+1]&255)<<16)|((long)(b[p+2]&255)<<8)|(b[p+3]&255);}
  private static long u64(byte[] b,int p){return (u32(b,p)<<32)|u32(b,p+4);}
@@ -51,7 +88,7 @@ public class MainActivity extends Activity {
  private static String bytes(long x){return x+" bytes ("+String.format(Locale.US,"%.2f",x/1048576.0)+" MiB)";}
  private String read(boolean scan)throws IOException{
   StringBuilder csvData=new StringBuilder("indice,id,nome_ref,flags,extra,offset,tamanho,limites_validos\\n");
-  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.2\n==============================\n");
+  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.3\n==============================\n");
   s.append("URI: ").append(file).append("\n");
   long fileSize=-1;
   try(android.database.Cursor c=getContentResolver().query(file,new String[]{android.provider.OpenableColumns.SIZE},null,null,null)){if(c!=null&&c.moveToFirst()&&!c.isNull(0))fileSize=c.getLong(0);}catch(Exception ignored){}
