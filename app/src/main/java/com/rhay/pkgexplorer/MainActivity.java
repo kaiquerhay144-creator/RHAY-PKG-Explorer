@@ -26,7 +26,7 @@ public class MainActivity extends Activity {
   root=new LinearLayout(this);root.setOrientation(1);root.setPadding(28,30,28,36);root.setBackgroundColor(bg);
   scroll.addView(root);setContentView(scroll);
   TextView title=text("RHAY  /  PKG EXPLORER",25,cyan);title.setTypeface(null,Typeface.BOLD);root.addView(title);
-  root.addView(text("PRO ANALYZER 2.3  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
+  root.addView(text("PRO ANALYZER 2.4  •  PS4 PACKAGE INSPECTOR",12,Color.rgb(160,187,209)));
   section("ARQUIVO");
   button("01   SELECIONAR PKG",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("*/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,PICK);});
   status=text("Nenhum pacote selecionado",13,Color.LTGRAY);root.addView(status);
@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
   button("04   EXPORTAR RELATÓRIO TXT",()->{if(report.isEmpty()){toast("Faça uma análise primeiro");return;}Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("text/plain");i.putExtra(Intent.EXTRA_TITLE,"RHAY_PKG_Explorer_2_relatorio.txt");startActivityForResult(i,SAVE);});
   button("05   EXPORTAR TABELA CSV",()->{if(csv.isEmpty()){toast("Analise o PKG primeiro");return;}Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("text/csv");i.putExtra(Intent.EXTRA_TITLE,"RHAY_PKG_entradas.csv");startActivityForResult(i,SAVE_CSV);});
   button("06   EXTRAIR ENTRADA INDIVIDUAL (RAW)",()->chooseEntry());
+  button("07   DECODIFICAR NOMES E CAMINHOS",()->decodeNames());
   section("RESULTADO");
   output=text("Selecione seu PKG e execute a análise. O original nunca será modificado.",13,Color.rgb(217,232,246));output.setTextIsSelectable(true);output.setPadding(18,20,18,20);output.setBackgroundColor(panel);root.addView(output);
   root.addView(text("Modo somente leitura • Não descriptografa dados protegidos • A listagem de entradas não equivale à extração dos arquivos do jogo.",11,Color.rgb(151,170,191)));
@@ -45,6 +46,46 @@ public class MainActivity extends Activity {
  private void button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextColor(Color.WHITE);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(26,74,104)));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=10;root.addView(b,p);b.setOnClickListener(v->r.run());}
  private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
  @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(result!=RESULT_OK||data==null)return;if(req==PICK){file=data.getData();status.setText("Selecionado: "+file.getLastPathSegment());try{getContentResolver().takePersistableUriPermission(file,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}}else if(req==EXPORT_ENTRY){exportEntry(data.getData());}else if(req==SAVE||req==SAVE_CSV){try(OutputStream o=getContentResolver().openOutputStream(data.getData())){if(o==null)throw new IOException("Não foi possível abrir destino");o.write((req==SAVE?report:csv).getBytes(StandardCharsets.UTF_8));toast("Arquivo salvo");}catch(Exception e){toast(e.toString());}}}
+ private void decodeNames(){
+  if(file==null){toast("Selecione o PKG");return;}
+  status.setText("Decodificando tabela de nomes...");
+  new Thread(()->{
+   String result;
+   try{
+    byte[] head=new byte[32];
+    try(InputStream in=getContentResolver().openInputStream(file)){if(in==null)throw new IOException("PKG inacessível");readFully(in,head);}
+    if(u32(head,0)!=0x7F434E54L)throw new IOException("Não é PKG PS4 CNT");
+    long count=u32(head,16),table=u32(head,24);
+    if(count<1||count>100000||table<512)throw new IOException("Tabela inválida");
+    byte[] records=new byte[(int)(count*32)];
+    try(InputStream in=getContentResolver().openInputStream(file)){if(in==null)throw new IOException("PKG inacessível");skipFully(in,table);readFully(in,records);}
+    long namesOffset=-1,namesSize=-1;
+    for(int i=0;i<count;i++){int p=i*32;if(u32(records,p)==0x200){namesOffset=u32(records,p+16);namesSize=u32(records,p+20);break;}}
+    StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.4 — NOMES INTERNOS\\n");
+    if(namesOffset<0||namesSize<1||namesSize>1048576)throw new IOException("Tabela de nomes não localizada");
+    byte[] names=new byte[(int)namesSize];
+    try(InputStream in=getContentResolver().openInputStream(file)){if(in==null)throw new IOException("PKG inacessível");skipFully(in,namesOffset);readFully(in,names);}
+    s.append("Tabela de nomes: ").append(hex(namesOffset)).append(" / ").append(namesSize).append(" bytes\\n");
+    s.append("Entradas com referência a nome:\\n");
+    int found=0;
+    for(int i=0;i<count;i++){
+     int p=i*32;long id=u32(records,p),ref=u32(records,p+4);
+     if(ref==0)continue;
+     if(ref>=names.length){s.append("#").append(i).append(" ref fora da tabela: ").append(hex(ref)).append("\\n");continue;}
+     int begin=(int)ref,end=begin;
+     while(end<names.length&&names[end]!=0&&end-begin<256)end++;
+     String name=new String(names,begin,end-begin,StandardCharsets.UTF_8);
+     boolean printable=!name.isEmpty();for(int k=0;k<name.length();k++)if(Character.isISOControl(name.charAt(k)))printable=false;
+     s.append(String.format(Locale.US,"#%04d ID=%s nome=%s offset=%s tamanho=%d bytes\\n",i,hex(id),printable?name:"[não legível]",hex(u32(records,p+16)),u32(records,p+20)));
+     if(printable)found++;
+    }
+    s.append("Nomes legíveis: ").append(found).append("\\n");
+    s.append("Atenção: nomes de entradas do PKG não são necessariamente caminhos completos do sistema de arquivos do jogo. Savedatas do console são separados do PKG de instalação.\\n");
+    result=s.toString();
+   }catch(Exception e){result="Erro ao decodificar nomes: "+e.getMessage();}
+   final String r=result;runOnUiThread(()->{report=r;output.setText(r);status.setText("Decodificação de nomes concluída");});
+  }).start();
+ }
  private void chooseEntry(){
   if(file==null){toast("Selecione o PKG");return;}
   EditText field=new EditText(this);field.setInputType(2);field.setHint("Exemplo: 5 para a entrada ID 0x200");
@@ -88,7 +129,7 @@ public class MainActivity extends Activity {
  private static String bytes(long x){return x+" bytes ("+String.format(Locale.US,"%.2f",x/1048576.0)+" MiB)";}
  private String read(boolean scan)throws IOException{
   StringBuilder csvData=new StringBuilder("indice,id,nome_ref,flags,extra,offset,tamanho,limites_validos\\n");
-  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.3\n==============================\n");
+  StringBuilder s=new StringBuilder("RHAY PKG EXPLORER 2.4\n==============================\n");
   s.append("URI: ").append(file).append("\n");
   long fileSize=-1;
   try(android.database.Cursor c=getContentResolver().query(file,new String[]{android.provider.OpenableColumns.SIZE},null,null,null)){if(c!=null&&c.moveToFirst()&&!c.isNull(0))fileSize=c.getLong(0);}catch(Exception ignored){}
